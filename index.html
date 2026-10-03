@@ -40,11 +40,11 @@ button{font:inherit;border:0;color:inherit;touch-action:manipulation}
 <button id="flow" class="action">FLOW</button>
 <button id="reset" class="action">RESET</button>
 </header>
-<div class="hint">PLAY · dibuja barreras o coloca señales para repartir el flujo</div>
+<div class="hint">Barrera = bloquea · Salida A / B = recomienda esa salida</div>
 <aside class="tools panel">
 <button class="tool active" data-tool="barrier"><strong>╱</strong>Barrera</button>
-<button class="tool" data-tool="signA"><strong>A</strong>Señal A</button>
-<button class="tool" data-tool="signB"><strong>B</strong>Señal B</button>
+<button class="tool" data-tool="signA"><strong>↖ A</strong>Salida A</button>
+<button class="tool" data-tool="signB"><strong>↗ B</strong>Salida B</button>
 <button class="tool" data-tool="erase"><strong>×</strong>Borrar</button>
 </aside>
 <footer class="controls panel">
@@ -113,7 +113,7 @@ function navIndexFromWorld(x,y){
 }
 
 function navCellBlocked(c,r){
-  var x=(c+.5)*NAV_CELL,y=(r+.5)*NAV_CELL,pad=NAV_CELL*.55;
+  var x=(c+.5)*NAV_CELL,y=(r+.5)*NAV_CELL,pad=7;
   if(x<playRect.x+8||x>playRect.x+playRect.w-8||y<playRect.y+10||y>playRect.y+playRect.h-8)return true;
   for(var i=0;i<obstacles.length;i++){
     var o=obstacles[i];
@@ -121,7 +121,7 @@ function navCellBlocked(c,r){
   }
   for(var j=0;j<barriers.length;j++){
     var b=barriers[j];
-    if(pointSeg(x,y,b.x1,b.y1,b.x2,b.y2)<pad+5)return true;
+    if(pointSeg(x,y,b.x1,b.y1,b.x2,b.y2)<pad+2)return true;
   }
   return false;
 }
@@ -161,7 +161,26 @@ function flowVector(a,exitId){
   var field=flowFields[exitId];
   var c=clamp(Math.floor(a.x/NAV_CELL),0,navCols-1),r=clamp(Math.floor(a.y/NAV_CELL),0,navRows-1);
   var idx=r*navCols+c,current=field[idx];
-  if(current===NAV_INF)return{x:0,y:0,reachable:false,d:NAV_INF};
+  if(current===NAV_INF){
+    var rescue=null,rescueScore=1e9;
+    for(var radius=1;radius<=4&&!rescue;radius++){
+      for(var rr0=r-radius;rr0<=r+radius;rr0++){
+        for(var cc0=c-radius;cc0<=c+radius;cc0++){
+          if(cc0<0||cc0>=navCols||rr0<0||rr0>=navRows)continue;
+          if(Math.max(Math.abs(cc0-c),Math.abs(rr0-r))!==radius)continue;
+          var ri=rr0*navCols+cc0,rv=field[ri];
+          if(navBlocked[ri]||rv===NAV_INF)continue;
+          var tx0=(cc0+.5)*NAV_CELL,ty0=(rr0+.5)*NAV_CELL;
+          var dx0=tx0-a.x,dy0=ty0-a.y,dl0=Math.hypot(dx0,dy0)||1;
+          if(!segmentFree(a.x,a.y,dx0/dl0,dy0/dl0,Math.min(dl0,28)))continue;
+          var rs=rv+dl0/NAV_CELL*.35;
+          if(rs<rescueScore){rescueScore=rs;rescue={x:dx0/dl0,y:dy0/dl0,d:rv}}
+        }
+      }
+    }
+    if(rescue)return{x:rescue.x,y:rescue.y,reachable:true,d:rescue.d};
+    return{x:0,y:0,reachable:false,d:NAV_INF};
+  }
 
   var dirs=[[0,-1],[1,0],[0,1],[-1,0],[1,-1],[1,1],[-1,1],[-1,-1]];
   var bestC=c,bestR=r,bestScore=current;
@@ -365,11 +384,19 @@ function render(){
   }
 
   signs.forEach(function(s){
-    ctx.fillStyle=s.exit===0?"rgba(36,107,253,.09)":"rgba(47,155,104,.09)";
-    ctx.beginPath();ctx.arc(s.x,s.y,115,0,Math.PI*2);ctx.fill();
-    rr(s.x-14,s.y-14,28,28,8,s.exit===0?"#246bfd":"#2f9b68");
-    ctx.fillStyle="#fff";ctx.font="900 11px sans-serif";ctx.textAlign="center";
-    ctx.fillText(s.exit===0?"A":"B",s.x,s.y+4);
+    var ex0=exits[s.exit],tx0=ex0.x+ex0.w/2,ty0=playRect.y;
+    var ang0=Math.atan2(ty0-s.y,tx0-s.x),arrow="↑";
+    if(ang0<-2.75||ang0>2.75)arrow="←";
+    else if(ang0<-1.96)arrow="↖";
+    else if(ang0<-1.18)arrow="↑";
+    else if(ang0<-.39)arrow="↗";
+    else if(ang0<.39)arrow="→";
+    else if(ang0<1.18)arrow="↘";
+    else if(ang0<1.96)arrow="↓";
+    else if(ang0<2.75)arrow="↙";
+    rr(s.x-23,s.y-14,46,28,9,s.exit===0?"#246bfd":"#2f9b68");
+    ctx.fillStyle="#fff";ctx.font="900 10px sans-serif";ctx.textAlign="center";
+    ctx.fillText(arrow+" "+(s.exit===0?"A":"B"),s.x,s.y+4);
   });
 
   ctx.lineCap="round";
@@ -398,7 +425,7 @@ canvas.addEventListener("pointerdown",function(ev){
   ev.preventDefault();var p=worldPoint(ev);if(!playable(p))return;
   pointer=true;canvas.setPointerCapture&&canvas.setPointerCapture(ev.pointerId);
   if(tool==="barrier")drawing={x1:p.x,y1:p.y,x2:p.x,y2:p.y};
-  else if(tool==="signA"||tool==="signB"){signs.push({x:p.x,y:p.y,exit:tool==="signA"?0:1});toast("Señal añadida")}
+  else if(tool==="signA"||tool==="signB"){signs.push({x:p.x,y:p.y,exit:tool==="signA"?0:1});toast(tool==="signA"?"Recomienda Salida A":"Recomienda Salida B")}
   else erase(p);
 });
 
